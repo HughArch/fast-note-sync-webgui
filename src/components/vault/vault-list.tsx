@@ -1,10 +1,10 @@
-import { Pencil, Trash2, BrushCleaning, Plus, Key, Globe, Monitor, Library, RefreshCw, Check, X, Search, GripVertical, FileText, Paperclip, HardDrive, Wifi, Clock, ScanText, Wrench, Copy } from "lucide-react";
+import { Pencil, Trash2, BrushCleaning, Plus, Key, Globe, Monitor, Library, RefreshCw, Check, X, Search, GripVertical, FileText, Paperclip, HardDrive, Wifi, Clock, ScanText, Wrench, Copy, Sparkles } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, rectSortingStrategy } from "@dnd-kit/sortable";
 import { TokenManager, TokenManagerHandle } from "@/components/user/token-manager";
 import { useConfirmDialog } from "@/components/context/confirm-dialog-context";
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { ObsidianAuthModal } from "@/components/user/obsidian-auth-modal";
+import { VaultAuthModal } from "@/components/user/vault-auth-modal";
 import { useVaultHandle } from "@/components/api-handle/vault-handle";
 import { Tooltip } from "@/components/ui/tooltip";
 import { toast } from "@/components/common/Toast";
@@ -35,7 +35,7 @@ interface SortableVaultCardProps {
   saveEdit: (vault: VaultType) => void;
   cancelEdit: () => void;
   handleDelete: (id: string) => void;
-  onViewConfig: (vaultName: string, e: React.MouseEvent) => void;
+  onViewConfig: (vaultName: string, e: React.MouseEvent, client?: "obsidian" | "flowix") => void;
   onNavigateToNotes?: (vaultName: string, mode?: "folder" | "flat") => void;
   onNavigateToAttachments?: (vaultName: string) => void;
   formatBytes: (bytes: string | number | undefined) => string;
@@ -240,7 +240,7 @@ function SortableVaultCard({
       </div>
 
       {/* 操作按钮区 */}
-      <footer className="flex items-center justify-between gap-2 mt-auto">
+      <footer className="flex items-center justify-between gap-2 mt-auto flex-wrap">
         {editingId === vault.id ? (
           <div className="flex items-center justify-end gap-2 w-full">
             <Button
@@ -266,15 +266,28 @@ function SortableVaultCard({
           </div>
         ) : (
           <>
-            <Tooltip content={t("ui.vault.authTokenConfig")} side="top" delay={200}>
-              <Button
-                className="h-8 px-3 rounded-xl border-none shadow-sm flex items-center gap-1.5"
-                onClick={(e) => onViewConfig(vault.vault, e)}
-              >
-                <Key className="h-4 w-4" />
-                <span className="text-xs font-medium">{t("ui.vault.authTokenConfig")}</span>
-              </Button>
-            </Tooltip>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Tooltip content={t("ui.vault.authTokenConfig")} side="top" delay={200}>
+                <Button
+                  className="h-8 px-3 rounded-xl border-none shadow-sm flex items-center gap-1.5"
+                  onClick={(e) => onViewConfig(vault.vault, e, "obsidian")}
+                >
+                  <Key className="h-4 w-4" />
+                  <span className="text-xs font-medium">{t("ui.vault.authTokenConfig")}</span>
+                </Button>
+              </Tooltip>
+
+              <Tooltip content={t("ui.vault.authFlowixToken")} side="top" delay={200}>
+                <Button
+                  variant="outline"
+                  className="h-8 px-3 rounded-xl shadow-sm flex items-center gap-1.5 border-border/70"
+                  onClick={(e) => onViewConfig(vault.vault, e, "flowix")}
+                >
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <span className="text-xs font-medium">{t("ui.vault.authFlowixToken")}</span>
+                </Button>
+              </Tooltip>
+            </div>
 
             <div className="flex items-center gap-1">
               <Tooltip content={t("ui.vault.toolbar") || "工具箱"} side="top">
@@ -404,6 +417,7 @@ export function VaultList({ onNavigateToNotes, onNavigateToAttachments, ftsBleve
   const [searchKeyword, setSearchKeyword] = useState("")
   const [configModalOpen, setConfigModalOpen] = useState(false)
   const [configVaultName, setConfigVaultName] = useState("")
+  const [configClient, setConfigClient] = useState<"obsidian" | "flowix">("obsidian")
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [tokenCount, setTokenCount] = useState(0)
   const [onlineCount, setOnlineCount] = useState(0)
@@ -594,9 +608,10 @@ export function VaultList({ onNavigateToNotes, onNavigateToAttachments, ftsBleve
   }
 
   // 查看仓库配置
-  const handleViewConfig = (vaultName: string, e: React.MouseEvent) => {
+  const handleViewConfig = (vaultName: string, e: React.MouseEvent, client: "obsidian" | "flowix" = "obsidian") => {
     e.stopPropagation()
     setConfigVaultName(vaultName)
+    setConfigClient(client)
     setConfigModalOpen(true)
   }
 
@@ -851,10 +866,11 @@ export function VaultList({ onNavigateToNotes, onNavigateToAttachments, ftsBleve
 
 
       {/* 配置模态窗口 */}
-      <ObsidianAuthModal
+      <VaultAuthModal
         open={configModalOpen}
         onOpenChange={setConfigModalOpen}
         vaultName={configVaultName}
+        client={configClient}
         onSuccess={() => tokenManagerRef.current?.refresh()}
       />
 

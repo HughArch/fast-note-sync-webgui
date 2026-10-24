@@ -1,7 +1,7 @@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuPortal, DropdownMenuGroup } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ObsidianAuthModal } from "@/components/user/obsidian-auth-modal";
-import { Key, LogOut, Lock, Bell } from "lucide-react";
+import { VaultAuthModal } from "@/components/user/vault-auth-modal";
+import { Key, LogOut, Lock, Bell, Sparkles } from "lucide-react";
 import { useSettingsStore, ToastPosition } from "@/lib/stores/settings-store";
 import { ChangePassword } from "@/components/user/change-password";
 import { useTranslation } from "react-i18next";
@@ -27,6 +27,7 @@ export function ProfileButton({ onLogout, className }: ProfileButtonProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [configModalOpen, setConfigModalOpen] = useState(false)
+  const [configClient, setConfigClient] = useState<"obsidian" | "flowix">("obsidian")
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const { toastPosition, setToastPosition } = useSettingsStore()
 
@@ -40,7 +41,8 @@ export function ProfileButton({ onLogout, className }: ProfileButtonProps) {
   }
 
   // 复制配置到剪贴板
-  const handleCopyConfig = () => {
+  const handleCopyConfig = (client: "obsidian" | "flowix" = "obsidian") => {
+    setConfigClient(client)
     setConfigModalOpen(true)
     setOpen(false)
   }
@@ -118,9 +120,13 @@ export function ProfileButton({ onLogout, className }: ProfileButtonProps) {
         <DropdownMenuGroup>
 
           {/* 复制配置 */}
-          <DropdownMenuItem onClick={handleCopyConfig} className="rounded-lg cursor-pointer">
+          <DropdownMenuItem onClick={() => handleCopyConfig("obsidian")} className="rounded-lg cursor-pointer">
             <Key className="mr-2 size-4 text-muted-foreground" />
             {t("ui.vault.authTokenConfig")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleCopyConfig("flowix")} className="rounded-lg cursor-pointer">
+            <Sparkles className="mr-2 size-4 text-muted-foreground" />
+            {t("ui.vault.authFlowixToken")}
           </DropdownMenuItem>
         </DropdownMenuGroup>
 
@@ -137,9 +143,10 @@ export function ProfileButton({ onLogout, className }: ProfileButtonProps) {
       </DropdownMenuContent>
 
       {/* 配置模态窗口 */}
-      <ObsidianAuthModal 
+      <VaultAuthModal
         open={configModalOpen} 
-        onOpenChange={setConfigModalOpen} 
+        onOpenChange={setConfigModalOpen}
+        client={configClient}
       />
 
       {/* 修改密码模态窗口 */}

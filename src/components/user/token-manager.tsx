@@ -2,7 +2,8 @@ import { ShieldCheck, Smartphone, Monitor, RefreshCw, RotateCw, Trash2, Clock, G
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator, } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from "@/components/ui/table";
-import { useEffect, useState, useCallback, forwardRef, useImperativeHandle } from "react";
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
+import env from "@/env.ts";
 import { useTokenHandle, TokenLog, type TokenInfo } from "@/components/api-handle/token-handle";
 import { useVaultHandle } from "@/components/api-handle/vault-handle";
 import { VaultType } from "@/lib/types/vault";
@@ -19,6 +20,16 @@ import { useAppStore } from "@/stores/app-store";
 import { cn } from "@/lib/utils";
 import React from "react";
 
+
+// Client dimension presets. The value is written to scope `c:` and matched
+// case-insensitively against the client's `X-Client` header by the server.
+const CLIENT_PRESETS = [
+  { id: "flowix", client: "flowix", remark: "Flowix" },
+  { id: "obsidian", client: "obsidianPlugin", remark: "Obsidian" },
+  { id: "any", client: "*", remark: null },
+] as const;
+
+const CLIENT_PRESET_REMARKS = ["Flowix", "Obsidian"];
 
 interface TokenManagerProps {
   isCompact?: boolean;
@@ -130,6 +141,24 @@ const TokenManagerInner = (
     const [newUserAgent, setNewUserAgent] = useState("");
     const [generatedToken, setGeneratedToken] = useState<string | null>(null);
     const [isCopied, setIsCopied] = useState(false);
+    const [isFlowixConfigCopied, setIsFlowixConfigCopied] = useState(false);
+    const clientDimInputRef = useRef<HTMLInputElement>(null);
+
+    const normalizedClientDim = newClientDim.trim().toLowerCase();
+    const activeClientPreset = CLIENT_PRESETS.find(p => p.client.toLowerCase() === normalizedClientDim)?.id ?? "custom";
+    const isFlowixPreset = normalizedClientDim === "flowix";
+    const flowixNameMismatch =
+      newClientType.trim().toLowerCase().includes("flowix") &&
+      normalizedClientDim !== "flowix" &&
+      normalizedClientDim !== "*";
+
+    const clientDimHint = isFlowixPreset
+      ? t("ui.token.clientDimHintFlowix")
+      : normalizedClientDim === "obsidianplugin"
+        ? t("ui.token.clientDimHintObsidian")
+        : normalizedClientDim === "*"
+          ? t("ui.token.clientDimHintAny")
+          : t("ui.token.clientDimHintCustom");
 
     // Rotation dialog state
     const [isRotateDialogOpen, setIsRotateDialogOpen] = useState(false);
@@ -331,12 +360,61 @@ const TokenManagerInner = (
       }
     }, [generatedToken, t]);
 
+    const handleCopyFlowixConfig = useCallback(() => {
+      if (!generatedToken) return;
+      const config = {
+        api: env.API_URL,
+        apiToken: generatedToken,
+        vault: selectedVaults[0] || "",
+      };
+      navigator.clipboard.writeText(JSON.stringify(config, null, 2)).then(() => {
+        setIsFlowixConfigCopied(true);
+        setTimeout(() => setIsFlowixConfigCopied(false), 2000);
+        toast.success(t("ui.vault.copyConfigSuccess") || "Copied to clipboard");
+      });
+    }, [generatedToken, selectedVaults, t]);
+
+    const applyClientPreset = (id: (typeof CLIENT_PRESETS)[number]["id"] | "custom") => {
+      if (id === "custom") {
+        clientDimInputRef.current?.focus();
+        clientDimInputRef.current?.select();
+        return;
+      }
+
+      const preset = CLIENT_PRESETS.find(p => p.id === id);
+      if (!preset) return;
+
+      setNewClientDim(preset.client);
+
+      // Flowix and the Obsidian plugin both sync over REST + Websocket.
+      if (preset.id !== "any") {
+        setNewProtocols(prev => {
+          const next = [...prev];
+          if (!next.includes("rest")) next.push("rest");
+          if (!next.includes("ws")) next.push("ws");
+          return next;
+        });
+      }
+
+      // Only replace the remark name while it is still a default/preset value,
+      // so a user-typed name is never clobbered by switching presets.
+      if (preset.remark) {
+        setNewClientType(prev => {
+          const name = prev.trim();
+          const isDefaultName = !name || name.toLowerCase() === "other" ||
+            CLIENT_PRESET_REMARKS.some(r => r.toLowerCase() === name.toLowerCase());
+          return isDefaultName ? preset.remark! : prev;
+        });
+      }
+    };
+
     const closeCreateDialog = () => {
       setIsCreateOpen(false);
       setIsEditMode(false);
       setIsRotateMode(false);
       setEditingTokenId(null);
       setGeneratedToken(null);
+      setIsFlowixConfigCopied(false);
       setNewClientType("Other");
       setNewProtocols(["rest", "ws"]);
       setNewClientDim("*");
@@ -540,13 +618,48 @@ const TokenManagerInner = (
                       </Tooltip>
                     </span>
                   </Label>
+                  <div className="flex flex-wrap gap-1">
+                    {[
+                      { id: "flowix" as const, label: t("ui.token.presetFlowix") },
+                      { id: "obsidian" as const, label: t("ui.token.presetObsidian") },
+                      { id: "any" as const, label: t("ui.token.presetAny") },
+                      { id: "custom" as const, label: t("ui.token.presetCustom") },
+                    ].map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => applyClientPreset(preset.id)}
+                        className={cn(
+                          "px-2 py-0.5 rounded-md border text-[10px] font-semibold transition-colors",
+                          activeClientPreset === preset.id
+                            ? "border-primary/40 bg-primary/10 text-primary"
+                            : "border-border bg-background text-muted-foreground hover:border-primary/30 hover:text-primary"
+                        )}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
                   <Input
                     id="clientDim"
+                    ref={clientDimInputRef}
                     value={newClientDim}
                     onChange={(e) => setNewClientDim(e.target.value)}
-                    placeholder="e.g. ObsidianPlugin, *"
+                    placeholder="flowix / ObsidianPlugin / *"
                     className="rounded-xl h-9"
                   />
+                  <p className={cn(
+                    "text-[10px] leading-relaxed px-1",
+                    isFlowixPreset ? "text-primary/80 font-medium" : "text-muted-foreground/70"
+                  )}>
+                    {clientDimHint}
+                  </p>
+                  {flowixNameMismatch && (
+                    <p className="text-[10px] leading-relaxed px-1 font-medium text-amber-600 dark:text-amber-400 flex items-start gap-1">
+                      <ShieldAlert className="h-3 w-3 shrink-0 mt-px" />
+                      <span>{t("ui.token.flowixMismatchWarning", { dim: newClientDim.trim() })}</span>
+                    </p>
+                  )}
                 </div>
 
                 {/* 第二行：协议限制 和 有效期 */}
@@ -725,9 +838,11 @@ const TokenManagerInner = (
                       </>
                     )}
                   </div>
+                  <p className="text-[10px] leading-relaxed text-muted-foreground/70 px-1 italic">
+                    {t("ui.token.vaultFlowixHint")}
+                  </p>
                 </div>
 
-                {/* 第四行：限制 IP 和 限制 UA */}
                 <div className="space-y-1.5">
                   <Label htmlFor="boundIp" className="text-sm font-bold text-muted-foreground flex items-center gap-2">
                     <Globe className="h-3 w-3" />
@@ -781,6 +896,29 @@ const TokenManagerInner = (
                     {isCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
                   </Button>
                 </div>
+                {isFlowixPreset && (
+                  <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-primary/5 border border-primary/15">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-foreground/80">{t("ui.token.flowixConfigTitle")}</p>
+                      <p className="text-[10px] text-muted-foreground leading-relaxed mt-0.5">
+                        {t("ui.token.flowixConfigDesc")}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-lg shrink-0"
+                      onClick={handleCopyFlowixConfig}
+                    >
+                      {isFlowixConfigCopied ? (
+                        <Check className="h-3.5 w-3.5 text-emerald-500" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                      {t("ui.token.copyFlowixConfig")}
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -818,7 +956,7 @@ const TokenManagerInner = (
               );
             }
             return filteredTokens.map((token) => {
-              const { protocols, funcs } = parseScope(token.scope);
+              const { protocols, client, funcs } = parseScope(token.scope);
               const expiry = getExpiryInfo(token.createdAt, token.expiredAt);
               const isSelf = token.id === currentTokenID;
 
@@ -894,6 +1032,16 @@ const TokenManagerInner = (
 
                             {/* 权限 Scope 详情 */}
                             <div className="flex flex-wrap gap-1 items-center">
+                              <Tooltip content={`scope: ${token.scope}`}>
+                                <Badge variant="outline" className={cn(
+                                  "h-4 text-[9px] px-1 font-medium whitespace-nowrap cursor-help",
+                                  client === "*"
+                                    ? "bg-muted text-muted-foreground border-border"
+                                    : "bg-violet-500/5 text-violet-600 border-violet-500/20"
+                                )}>
+                                  {t("ui.token.scopeClient")}: {client}
+                                </Badge>
+                              </Tooltip>
                               {funcs.length === 0 ? (
                                 <Badge variant="outline" className="h-4 text-[9px] px-1 font-medium bg-muted text-muted-foreground border-border">{t("ui.token.unrestrictedFunc")}</Badge>
                               ) : (

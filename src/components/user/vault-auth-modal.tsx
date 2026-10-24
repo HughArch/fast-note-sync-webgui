@@ -12,21 +12,26 @@ import { Checkbox } from "@/components/ui/checkbox";
 import env from "@/env.ts";
 import { Textarea } from "../ui/textarea";
 
-interface ObsidianAuthModalProps {
+interface VaultAuthModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   vaultName?: string;
+  client?: "obsidian" | "flowix";
   onSuccess?: () => void;
 }
 
-export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: ObsidianAuthModalProps) {
+export function VaultAuthModal({ open, onOpenChange, vaultName, client = "obsidian", onSuccess }: VaultAuthModalProps) {
   const { t } = useTranslation();
+  const isFlowix = client === "flowix";
   const defaultPreset = t("ui.obsidian.presetWin", "我的Win")
   const { handleCreateToken, isLoading } = useTokenHandle();
   const [generatedToken, setGeneratedToken] = useState<string | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<string>(defaultPreset);
   const [customNote, setCustomNote] = useState("");
+  const [flowixNote, setFlowixNote] = useState("");
   const [limitVault, setLimitVault] = useState(true);
+
+  const defaultFlowixNote = vaultName ? `Flowix - ${vaultName}` : "Flowix";
 
   // Reset generated token and fields when modal closes
   useEffect(() => {
@@ -34,18 +39,23 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
       setGeneratedToken(null);
       setSelectedPreset(defaultPreset);
       setCustomNote("");
+      setFlowixNote("");
       setLimitVault(true);
+    } else if (isFlowix) {
+      setFlowixNote(defaultFlowixNote);
     }
-  }, [open, defaultPreset]);
+  }, [open, defaultPreset, isFlowix, defaultFlowixNote]);
 
   const onGenerate = async () => {
-    // Generate a token for Obsidian with rest and ws scopes
+    // Generate a token for the target client with rest and ws scopes
     const vaultsParam = (vaultName && limitVault) ? vaultName : undefined;
-    const finalNote = selectedPreset === "custom" ? customNote.trim() : selectedPreset;
+    const finalNote = isFlowix
+      ? (flowixNote.trim() || defaultFlowixNote)
+      : (selectedPreset === "custom" ? customNote.trim() : selectedPreset);
     const clientParam = finalNote || (vaultName ? `Obsidian - ${vaultName}` : "Obsidian");
-    
+
     // clientType (1st arg) represents the User-defined Title/Remark shown in WebGUI cards.
-    // client (7th arg) strictly restricts token usage to the "ObsidianPlugin".
+    // client (7th arg) strictly restricts token usage to the target client id.
     const token = await handleCreateToken(
       clientParam, // clientType (Remark/Title)
       "rest,ws", // scope (legacy)
@@ -53,7 +63,7 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
       undefined, // boundIp
       undefined, // userAgent
       "rest,ws", // protocol
-      "ObsidianPlugin", // client (Strict Client Restriction)
+      isFlowix ? "flowix" : "ObsidianPlugin", // client (Strict Client Restriction)
       undefined, // functionScope
       vaultsParam // vaults
     );
@@ -121,7 +131,7 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
             <div className="p-1.5 bg-primary/10 rounded-lg shrink-0">
               <Key className="h-4 w-4 text-primary" />
             </div>
-            {t("ui.vault.authTokenConfig", "授权 Obsidian")}
+            {isFlowix ? t("ui.vault.authFlowixToken", "授权 Flowix") : t("ui.vault.authTokenConfig", "授权 Obsidian")}
             {vaultName && (
               <span className="text-xs sm:text-sm text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-full ml-1.5 truncate max-w-[120px] sm:max-w-[200px]">
                 {vaultName}
@@ -129,7 +139,9 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
             )}
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground/80 mt-1">
-            {t("ui.obsidian.generateTokenDesc", "为 Obsidian 插件生成一个具有完整同步权限 (REST + WebSocket) 的专用授权令牌。")}
+            {isFlowix
+              ? t("ui.flowix.generateTokenDesc", "为 Flowix 桌面端生成一个具有完整同步权限 (REST + WebSocket) 的专用授权令牌，客户端维度固定为 c:flowix。")
+              : t("ui.obsidian.generateTokenDesc", "为 Obsidian 插件生成一个具有完整同步权限 (REST + WebSocket) 的专用授权令牌。")}
           </DialogDescription>
         </DialogHeader>
 
@@ -150,10 +162,14 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
             {/* Title & Desc */}
             <div className="text-center space-y-1 mb-5">
               <h3 className="font-bold text-sm tracking-tight text-foreground">
-                {t("ui.obsidian.tokenRequired", "自动生成授权令牌")}
+                {isFlowix
+                  ? t("ui.flowix.tokenRequired", "自动生成 Flowix 授权令牌")
+                  : t("ui.obsidian.tokenRequired", "自动生成授权令牌")}
               </h3>
               <p className="text-[11px] text-muted-foreground/90 mx-auto leading-relaxed">
-                {t("ui.obsidian.tokenPrompt", "点击下方按钮生成一个专用的授权令牌，用于在 Obsidian 中进行同步, 服务端不会保存令牌。")}
+                {isFlowix
+                  ? t("ui.flowix.tokenPrompt", "点击下方按钮生成一个专用令牌，并绑定当前笔记库。生成后可在 Flowix 中直接使用。")
+                  : t("ui.obsidian.tokenPrompt", "点击下方按钮生成一个专用的授权令牌，用于在 Obsidian 中进行同步, 服务端不会保存令牌。")}
               </p>
             </div>
 
@@ -161,10 +177,18 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
             <div className="min-w-45 space-y-3 z-10">
               <div className="space-y-1 w-full">
                 <Label className="text-[10px] font-semibold tracking-wider text-muted-foreground/75 uppercase text-center block w-full">
-                  {t("ui.obsidian.remark", "令牌备注")}
+                  {isFlowix ? t("ui.flowix.remark", "令牌备注") : t("ui.obsidian.remark", "令牌备注")}
                 </Label>
-                
-                {selectedPreset !== "custom" ? (
+
+                {isFlowix ? (
+                  <Input
+                    id="flowixNote"
+                    placeholder={t("ui.flowix.remarkPlaceholder", "输入备注...")}
+                    value={flowixNote}
+                    onChange={(e) => setFlowixNote(e.target.value)}
+                    className="h-8 px-3 py-1 text-xs rounded-lg bg-background border-border/60 text-center min-h-0 w-full shadow-sm"
+                  />
+                ) : selectedPreset !== "custom" ? (
                   <Select value={selectedPreset} onValueChange={setSelectedPreset}>
                     <SelectTrigger className="h-8 text-xs rounded-lg bg-background border-border/60 hover:border-border min-h-0 px-3 py-1 flex items-center justify-between w-full shadow-sm transition-all">
                       <SelectValue placeholder={t("ui.obsidian.remark", "令牌备注")} />
@@ -246,7 +270,9 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
               ) : (
                 <>
                   <Key className="h-3.5 w-3.5 mr-1.5" />
-                  {t("ui.obsidian.generateToken", "生成并授权")}
+                  {isFlowix
+                    ? t("ui.flowix.generateToken", "生成并授权")
+                    : t("ui.obsidian.generateToken", "生成并授权")}
                 </>
               )}
             </Button>
@@ -262,14 +288,44 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
                 </div>
               </div>
               <h3 className="font-bold text-sm text-emerald-500">
-                {t("ui.obsidian.authSuccess", "已成功生成授权令牌！")}
+                {isFlowix
+                  ? t("ui.flowix.authSuccess", "已成功生成 Flowix 授权令牌！")
+                  : t("ui.obsidian.authSuccess", "已成功生成授权令牌！")}
               </h3>
               <p className="text-[10.5px] text-muted-foreground max-w-xs leading-normal">
-                {t("ui.obsidian.importPrompt", "为了将笔记同步到该客户端，请选择以下任一方式完成配置：")}
+                {isFlowix
+                  ? t("ui.flowix.importPrompt", "请将以下配置填入 Flowix 客户端的笔记本绑定信息中：")
+                  : t("ui.obsidian.importPrompt", "为了将笔记同步到该客户端，请选择以下任一方式完成配置：")}
               </p>
             </div>
 
             {/* Config Mode Option Cards */}
+            {isFlowix ? (
+              <div className="border border-primary/20 bg-primary/5 rounded-xl p-3 sm:p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-xs text-primary">
+                    {t("ui.flowix.configTitle", "配置信息")}
+                  </h4>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 text-[10px] rounded-lg text-muted-foreground hover:text-foreground hover:bg-background border-border/50 gap-1 px-2.5 shadow-sm"
+                    onClick={handleCopyConfig}
+                  >
+                    <Clipboard className="h-3 w-3" />
+                    {t("ui.vault.copyConfig", "复制 JSON")}
+                  </Button>
+                </div>
+                <div className="relative group">
+                  <Textarea readOnly className="p-3 rounded-lg bg-background text-[10px]! sm:text-xs! min-h-52 font-mono whitespace-pre-wrap border border-border/60 text-muted-foreground/85">
+                    {getConfigJson()}
+                  </Textarea>
+                </div>
+                <p className="text-[10px] text-muted-foreground/90 leading-relaxed">
+                  {t("ui.flowix.configHint", "在 Flowix 中新建笔记本，选择该笔记库并粘贴 apiToken 即可开始同步。")}
+                </p>
+              </div>
+            ) : (
             <div className="space-y-3">
               {/* Method 1: Automatic One-Click SSO Config (Recommended) */}
               <div
@@ -316,6 +372,7 @@ export function ObsidianAuthModal({ open, onOpenChange, vaultName, onSuccess }: 
                 </div>
               </div>
             </div>
+            )}
 
             {/* Bottom Controls */}
             <div className="flex justify-end gap-2 pt-1">
