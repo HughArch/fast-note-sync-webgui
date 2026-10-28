@@ -1,4 +1,6 @@
 import "./markdown-editor.css";
+import "./flowix-blocks.css";
+import flowixBlocksStyles from "./flowix-blocks.css?inline";
 
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorView, placeholder as cmPlaceholder } from "@codemirror/view";
@@ -32,6 +34,12 @@ import { cn } from "@/lib/utils";
 import { getBrowserLang } from "@/i18n/utils";
 import env from "@/env.ts";
 import { createHeadingIdGenerator, createHeadingSlug } from "./heading-id";
+import {
+    flowixTextMarkClasses,
+    flowixWebCardHtml,
+    parseFlowixTextStylePayload,
+    remarkFlowixBlocks,
+} from "./flowix-markdown";
 
 const CALLOUT_ICONS: Record<string, LucideIcon> = {
     "pencil": Pencil,
@@ -194,12 +202,22 @@ const CM6_BASIC_SETUP = {
     highlightActiveLineGutter: false,
 };
 
-const REMARK_PLUGINS: NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]> = [remarkBreaks, [remarkGfm, { singleTilde: false }], remarkMath];
+const REMARK_PLUGINS: NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]> = [
+    remarkBreaks,
+    [remarkGfm, { singleTilde: false }],
+    remarkMath,
+    remarkFlowixBlocks,
+];
 const OBSIDIAN_SANITIZE_SCHEMA = {
     ...defaultSchema,
     tagNames: [
         ...(defaultSchema.tagNames ?? []),
         "mark",
+        // Tiptap (Flowix) persists underline as ++text++ and renders it with
+        // <u>; the default GitHub-style schema does not whitelist <u>.
+        // Tiptap（Flowix）用 ++text++ 持久化下划线并渲染为 <u>，默认的
+        // GitHub 风格白名单不含 <u>。
+        "u",
         // Allow inline media tags so notes containing raw HTML <video>/<audio>
         // (and the <source> children typically used inside them) actually play
         // instead of being silently stripped by rehype-sanitize.
@@ -211,6 +229,25 @@ const OBSIDIAN_SANITIZE_SCHEMA = {
     ],
     attributes: {
         ...(defaultSchema.attributes ?? {}),
+        // Flowix rich-content classes/attributes. Fenced containers become
+        // plain <div> elements (class + data-open/data-width), line backgrounds
+        // become a class on the paragraph/heading, and collapsed code blocks
+        // carry a data-flowix-collapsed flag.
+        // Flowix 富文本块所需的 class 与 data 属性：围栏容器转成普通 div，
+        // 行背景色落在段落/标题的 class 上，折叠代码块带 data 标记。
+        div: [...(defaultSchema.attributes?.div ?? []), "className", "data*"],
+        // `findDefinition` returns the first exact match, so append a class
+        // allow-list that still permits the default `sr-only` on h2.
+        p: [["className", /^flowix-/]],
+        h1: [["className", /^flowix-/]],
+        h2: [["className", /^flowix-/, "sr-only"]],
+        h3: [["className", /^flowix-/]],
+        h4: [["className", /^flowix-/]],
+        h5: [["className", /^flowix-/]],
+        h6: [["className", /^flowix-/]],
+        mark: [["className", /^flowix-/]],
+        li: [["className", /^flowix-/, "task-list-item"]],
+        code: [...(defaultSchema.attributes?.code ?? []), "data*"],
         span: [...(defaultSchema.attributes?.span ?? []), "className", "title", "style", "aria-hidden"],
         img: [...(defaultSchema.attributes?.img ?? []), "width"],
         // Whitelist of safe presentation/playback attributes only — no event
@@ -306,6 +343,7 @@ mark {
 .hljs-title, .hljs-section, .hljs-name { color: #16a34a; }
 .hljs-string, .hljs-attr, .hljs-template-tag { color: #b45309; }
 .hljs-number, .hljs-built_in, .hljs-type { color: #9333ea; }
+${flowixBlocksStyles}
 `;
 
 // ─── 工具函数 ───────────────────────────────────────────────
@@ -839,6 +877,25 @@ export function transformObsidianSyntax(
         return `${CODE_PLACEHOLDER}${index}\0`;
     });
 
+    // Flowix web cards are a single `::webcard{…}` block (often pretty-printed
+    // across lines). Protect them from the Obsidian passes below (`#tag`,
+    // `==highlight==`, link rewriting) so their JSON survives intact; the
+    // remark plugin renders them afterwards.
+    // Flowix 网页卡片是 `::webcard{…}` 单块（通常跨行缩进）；先占位保护，
+    // 避免下面的 #tag / ==高亮== / 链接重写改写 JSON。
+    const webCards: string[] = [];
+    const WEB_CARD_PLACEHOLDER = "\0FLOWIX_WEBCARD_";
+    result = result.replace(/^::webcard[ \t]*\{[\s\S]*?\r?\n\}[ \t]*$/gm, (match) => {
+        const index = webCards.length;
+        webCards.push(match);
+        return `${WEB_CARD_PLACEHOLDER}${index}\0`;
+    });
+    result = result.replace(/^::webcard[ \t]*\{.*\}[ \t]*$/gm, (match) => {
+        const index = webCards.length;
+        webCards.push(match);
+        return `${WEB_CARD_PLACEHOLDER}${index}\0`;
+    });
+
     // 再提取行内代码（`...` 或 ``...``），避免匹配已提取的占位符
     result = result.replace(/(`+)(?!\0)(.+?)\1/g, (match) => {
         const index = codeBlocks.length;
@@ -918,8 +975,42 @@ export function transformObsidianSyntax(
         return `<span class="obsidian-wiki-link" title="${parts[0].trim()}">${display}</span>`;
     });
 
+    // 4b. Flowix semantic highlight: ==text==<!-- flowix:text {"bg":"…","fg":"…"} -->
+    // The colour lives in a trailing HTML comment so older readers still see
+    // a normal ==highlight==. Lift it into classes before the generic
+    // highlight pass turns the marker into a plain <mark>.
+    // Flowix 语义高亮：颜色保存在尾随注释里，先把它提升为 class，再走普通
+    // ==高亮== 转换。
+    result = result.replace(
+        /==([^=\n]+)==[ \t]*<!--\s*flowix:text\s+(\{[^}\n]*\})\s*-->/g,
+        (_match, text: string, payload: string) => {
+            const classes = flowixTextMarkClasses(parseFlowixTextStylePayload(payload));
+            return classes.length > 0
+                ? `<mark class="${classes.join(" ")}">${text}</mark>`
+                : `<mark>${text}</mark>`;
+        }
+    );
+
+    // 4c. Flowix internal note links cannot resolve on a public share page;
+    // keep the label as a wiki-link style span instead of letting sanitize
+    // strip the unsupported flowix:// protocol and leave a dead anchor.
+    result = result.replace(
+        /\[([^\]]*)\]\(flowix:\/\/open\?[^)]*\)/g,
+        (_match, label: string) => {
+            const display = label.trim() || "Note";
+            return `<span class="obsidian-wiki-link" title="${escapeHtmlAttribute(display)}">${display}</span>`;
+        }
+    );
+
     // 5. ==highlight== 高亮
     result = result.replace(/==(.*?)==/g, "<mark>$1</mark>");
+
+    // 5b. ++underline++ 下划线（Tiptap / Flowix 的 underline mark）
+    // Mirrors the editor tokenizer: `++` + non-empty content + `++`, with the
+    // captured content trimmed.
+    result = result.replace(/\+{2}([\s\S]+?)\+{2}/g, (_match, text: string) => {
+        return `<u>${text.trim()}</u>`;
+    });
 
     // 6. #tag 标签（不匹配行首的标题 #，前缀仅允许空白或行首）
     result = result.replace(/(^|[\s])#([a-zA-Z\u4e00-\u9fff][\w/\u4e00-\u9fff-]*)/gm, (_, prefix, tag) => {
@@ -930,9 +1021,12 @@ export function transformObsidianSyntax(
     result = result.replace(/\\begin\{multline\}/g, "\\begin{gathered}");
     result = result.replace(/\\end\{multline\}/g, "\\end{gathered}");
 
-    // 8. 还原代码块占位符
+    // 8. 还原代码块与 Flowix 网页卡片占位符
     result = result.replace(new RegExp(`${CODE_PLACEHOLDER.replace(/\0/g, "\\0")}(\\d+)\\0`, "g"), (_, index) => {
         return codeBlocks[parseInt(index, 10)];
+    });
+    result = result.replace(new RegExp(`${WEB_CARD_PLACEHOLDER.replace(/\0/g, "\\0")}(\\d+)\\0`, "g"), (_, index) => {
+        return flowixWebCardHtml(webCards[parseInt(index, 10)]);
     });
 
     return result;
@@ -1082,12 +1176,14 @@ function createHeadingComponent(Tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6', de
 
 interface MarkdownCodeBlockProps extends React.ComponentPropsWithoutRef<"pre"> {
     enableCopy: boolean;
+    collapsed?: boolean;
 }
 
-function MarkdownCodeBlock({ className, children, enableCopy, ...props }: MarkdownCodeBlockProps) {
+function MarkdownCodeBlock({ className, children, enableCopy, collapsed = false, ...props }: MarkdownCodeBlockProps) {
     const { t } = useTranslation();
     const [copied, setCopied] = useState(false);
     const [showLineNumbers, setShowLineNumbers] = useState(false);
+    const [isCollapsed, setIsCollapsed] = useState(collapsed);
     const codeText = useMemo(() => normalizeCodeBlockText(children), [children]);
     const lineNumbers = useMemo(() => codeText.split("\n").map((_, index) => index + 1), [codeText]);
     const copyLabel = copied ? t("ui.common.copied") : t("ui.common.copy");
@@ -1119,7 +1215,20 @@ function MarkdownCodeBlock({ className, children, enableCopy, ...props }: Markdo
 
     return (
         <div className="group relative my-4">
-            {enableCopy && codeText && (
+            {collapsed && (
+                <button
+                    type="button"
+                    className="flowix-code-collapse-toggle"
+                    aria-expanded={!isCollapsed}
+                    onClick={() => setIsCollapsed(value => !value)}
+                >
+                    <ChevronRight className={cn("size-3.5 transition-transform", !isCollapsed && "rotate-90")} />
+                    {isCollapsed
+                        ? t("ui.note.expandCodeBlock", { defaultValue: "Expand code" })
+                        : t("ui.note.collapseCodeBlock", { defaultValue: "Collapse code" })}
+                </button>
+            )}
+            {enableCopy && codeText && !isCollapsed && (
                 <div className="absolute right-2 top-2 z-10 flex gap-1 opacity-80 transition group-hover:opacity-100 focus-within:opacity-100">
                     <Button
                         type="button"
@@ -1154,7 +1263,7 @@ function MarkdownCodeBlock({ className, children, enableCopy, ...props }: Markdo
                     </Button>
                 </div>
             )}
-            <div className="flex overflow-hidden rounded-lg border border-border/60 bg-muted/40">
+            <div className="flex overflow-hidden rounded-lg border border-border/60 bg-muted/40" hidden={isCollapsed}>
                 {showLineNumbers && (
                     <div
                         className="select-none border-r border-border/60 bg-background/30 px-3 py-4 text-right font-mono text-sm leading-6 text-muted-foreground/70"
@@ -1182,6 +1291,110 @@ function MarkdownCodeBlock({ className, children, enableCopy, ...props }: Markdo
 
 // ─── React Markdown 自定义组件 ──────────────────────────────
 
+/**
+ * Flowix toggle (折叠列表) rendered from the virtual `div.flowix-toggle`
+ * wrapper produced by `remarkFlowixBlocks`. The first child block is the
+ * title; every following block belongs to the collapsible body.
+ */
+function FlowixToggle({
+    open,
+    className,
+    children,
+}: {
+    open: boolean;
+    className?: string;
+    children?: React.ReactNode;
+}) {
+    const { t } = useTranslation();
+    const [expanded, setExpanded] = useState(open);
+    const items = React.Children.toArray(children);
+    const title = items.length > 0 ? items[0] : null;
+    const body = items.slice(1);
+    const label = expanded
+        ? t("ui.note.collapseBlock", { defaultValue: "Collapse" })
+        : t("ui.note.expandBlock", { defaultValue: "Expand" });
+
+    return (
+        <div className={cn("flowix-toggle", className)} data-open={expanded ? "true" : "false"}>
+            <button
+                type="button"
+                className="flowix-toggle-chevron"
+                aria-expanded={expanded}
+                aria-label={label}
+                title={label}
+                onClick={() => setExpanded(value => !value)}
+            />
+            <div className="flowix-toggle-content">
+                <div className="flowix-toggle-title">{title}</div>
+                <div className="flowix-toggle-body" hidden={!expanded}>
+                    {body}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/** Only http(s) URLs may become links/images inside a shared note. */
+function safeWebcardUrl(value: string): URL | null {
+    if (!value) return null;
+    try {
+        const url = new URL(value);
+        return url.protocol === "http:" || url.protocol === "https:" ? url : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Flowix web card (`::webcard{…}`), rendered read-only. */
+function FlowixWebCard({
+    url,
+    title,
+    description,
+    image,
+}: {
+    url: string;
+    title: string;
+    description: string;
+    image: string;
+}) {
+    const target = safeWebcardUrl(url);
+    const imageUrl = safeWebcardUrl(image);
+    const heading = title || target?.hostname || url;
+
+    const card = (
+        <>
+            {imageUrl && (
+                <img
+                    className="flowix-webcard-image"
+                    src={imageUrl.toString()}
+                    alt=""
+                    loading="lazy"
+                />
+            )}
+            <div className="flowix-webcard-body">
+                {heading && <div className="flowix-webcard-title">{heading}</div>}
+                {description && <div className="flowix-webcard-description">{description}</div>}
+                {target && <div className="flowix-webcard-host">{target.hostname}</div>}
+            </div>
+        </>
+    );
+
+    return target ? (
+        <a className="flowix-webcard" href={target.toString()} target="_blank" rel="noreferrer">
+            {card}
+        </a>
+    ) : (
+        <div className="flowix-webcard">{card}</div>
+    );
+}
+
+/** Map a GFM table `align` value onto a text-alignment class. */
+function tableAlignClass(align: unknown): string {
+    if (align === "center") return "text-center";
+    if (align === "right") return "text-right";
+    return "text-left";
+}
+
 const markdownComponents: Components = {
     h1: createHeadingComponent('h1', "mt-8 mb-4 text-3xl font-bold first:mt-0", 1),
     h2: createHeadingComponent('h2', "mt-7 mb-3 text-2xl font-semibold first:mt-0", 2),
@@ -1192,6 +1405,46 @@ const markdownComponents: Components = {
     p: ({ node: _node, className, ...props }) => (
         <p className={cn("my-3 leading-7 text-foreground/90", className)} {...props} />
     ),
+    div: ({ node: _node, className, children, ...props }) => {
+        const classes = (className ?? "").split(/\s+/).filter(Boolean);
+        const data = props as Record<string, unknown>;
+
+        if (classes.includes("flowix-toggle")) {
+            const open = data["data-open"] !== "false";
+            return (
+                <FlowixToggle open={open} className={className}>
+                    {children}
+                </FlowixToggle>
+            );
+        }
+
+        if (classes.includes("flowix-webcard")) {
+            return (
+                <FlowixWebCard
+                    url={String(data["data-url"] ?? "")}
+                    title={String(data["data-title"] ?? "")}
+                    description={String(data["data-description"] ?? "")}
+                    image={String(data["data-image"] ?? "")}
+                />
+            );
+        }
+
+        if (classes.includes("flowix-column")) {
+            const width = Number(data["data-width"]);
+            const grow = Number.isFinite(width) && width > 0 ? width : 100;
+            return (
+                <div
+                    className={className}
+                    data-width={String(grow)}
+                    style={{ flexGrow: grow }}
+                >
+                    {children}
+                </div>
+            );
+        }
+
+        return <div className={className} {...props}>{children}</div>;
+    },
     ul: ({ node: _node, className, ...props }) => (
         <ul className={cn("my-3 list-disc pl-6", className)} {...props} />
     ),
@@ -1248,17 +1501,17 @@ const markdownComponents: Components = {
     ),
     table: ({ node: _node, className, ...props }) => (
         <div className="my-4 overflow-x-auto">
-            <table className={cn("w-full border-collapse text-sm", className)} {...props} />
+            <table className={cn("flowix-table w-full border-collapse text-sm", className)} {...props} />
         </div>
     ),
     thead: ({ node: _node, className, ...props }) => (
-        <thead className={cn("bg-muted/50", className)} {...props} />
+        <thead className={cn("bg-sky-50 dark:bg-sky-950/30", className)} {...props} />
     ),
-    th: ({ node: _node, className, ...props }) => (
-        <th className={cn("border border-border px-3 py-2 text-left font-semibold", className)} {...props} />
+    th: ({ node: _node, className, align, ...props }) => (
+        <th className={cn("border border-border px-3 py-2 font-semibold", tableAlignClass(align), className)} {...props} />
     ),
-    td: ({ node: _node, className, ...props }) => (
-        <td className={cn("border border-border px-3 py-2 align-top", className)} {...props} />
+    td: ({ node: _node, className, align, ...props }) => (
+        <td className={cn("border border-border px-3 py-2 align-top", tableAlignClass(align), className)} {...props} />
     ),
     img: ({ node: _node, className, alt, ...props }) => (
         <img
@@ -1316,6 +1569,9 @@ const markdownComponents: Components = {
     code: ({ node: _node, className, children, ...props }) => {
         const value = String(children);
         const isInline = !className && !value.includes("\n");
+        // Flowix persists code folding in the fence info (` ```json collapsed`)
+        // and our remark plugin surfaces it as a data attribute.
+        const collapsed = (props as Record<string, unknown>)["data-flowix-collapsed"] === "true";
 
         if (className && className.split(" ").includes("language-mermaid")) {
             return <MermaidBlock code={value.replace(/\n$/, "")} />;
@@ -1330,7 +1586,7 @@ const markdownComponents: Components = {
         }
 
         return (
-            <code className={cn("text-sm", className)} {...props}>
+            <code className={cn("text-sm", className, collapsed && "flowix-code-collapsed")} {...props}>
                 {children}
             </code>
         );
@@ -1371,11 +1627,23 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
 
     const mergedComponents = useMemo<Components>(() => ({
         ...markdownComponents,
-        pre: ({ node: _node, ref: _ref, className, children, ...props }) => (
-            <MarkdownCodeBlock className={className} enableCopy={enableCodeCopy} {...props}>
-                {children}
-            </MarkdownCodeBlock>
-        ),
+        pre: ({ node: _node, ref: _ref, className, children, ...props }) => {
+            // Markdown's `<pre>` wraps the `<code>` element; a Flowix collapsed
+            // fence reaches us as a class on that child.
+            const collapsed = React.Children.toArray(children).some(child => {
+                if (!React.isValidElement(child)) return false;
+                const childProps = child.props as Record<string, unknown>;
+                if (childProps["data-flowix-collapsed"] === "true") return true;
+                return String(childProps.className ?? "")
+                    .split(" ")
+                    .includes("flowix-code-collapsed");
+            });
+            return (
+                <MarkdownCodeBlock className={className} enableCopy={enableCodeCopy} collapsed={collapsed} {...props}>
+                    {children}
+                </MarkdownCodeBlock>
+            );
+        },
         ...additionalComponents,
     }), [additionalComponents, enableCodeCopy]);
 

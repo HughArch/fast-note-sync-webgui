@@ -1,0 +1,358 @@
+/* ─── Flowix rich-content blocks (shared by preview + HTML export) ───
+ *
+ * The palette mirrors Flowix's editor (`--flowix-text-*`), which itself maps
+ * onto its `--memo-color-*` theme tokens. Values are duplicated here instead of
+ * sharing Tailwind classes because they must also work in the standalone HTML
+ * export, where the app stylesheet is not loaded.
+ */
+
+:root {
+  --flowix-color-red: oklch(64% 0.14 25);
+  --flowix-color-orange: oklch(70% 0.13 48);
+  --flowix-color-yellow: oklch(78% 0.115 86);
+  --flowix-color-green: oklch(66% 0.125 145);
+  --flowix-color-cyan: oklch(66% 0.09 215);
+  --flowix-color-blue: oklch(60% 0.15 257);
+  --flowix-color-purple: oklch(60% 0.16 300);
+  --flowix-color-pink: oklch(66% 0.2 350);
+  --flowix-color-gray: oklch(62% 0.008 264);
+}
+
+html.dark,
+.dark {
+  --flowix-color-red: oklch(64% 0.185 27);
+  --flowix-color-orange: oklch(70% 0.165 52);
+  --flowix-color-yellow: oklch(78% 0.155 88);
+  --flowix-color-green: oklch(70% 0.18 142);
+  --flowix-color-cyan: oklch(70% 0.125 215);
+  --flowix-color-blue: oklch(64% 0.185 260);
+  --flowix-color-purple: oklch(70% 0.18 300);
+  --flowix-color-pink: oklch(74% 0.18 350);
+  --flowix-color-gray: oklch(64% 0.015 264);
+}
+
+.flowix-bg-red { --flowix-block-bg-color: var(--flowix-color-red); }
+.flowix-bg-orange { --flowix-block-bg-color: var(--flowix-color-orange); }
+.flowix-bg-yellow { --flowix-block-bg-color: var(--flowix-color-yellow); }
+.flowix-bg-green { --flowix-block-bg-color: var(--flowix-color-green); }
+.flowix-bg-cyan { --flowix-block-bg-color: var(--flowix-color-cyan); }
+.flowix-bg-blue { --flowix-block-bg-color: var(--flowix-color-blue); }
+.flowix-bg-purple { --flowix-block-bg-color: var(--flowix-color-purple); }
+.flowix-bg-pink { --flowix-block-bg-color: var(--flowix-color-pink); }
+.flowix-bg-gray { --flowix-block-bg-color: var(--flowix-color-gray); }
+
+/* ── Line / container background ─────────────────────────── */
+
+.flowix-block-bg {
+  background-color: color-mix(in oklch, var(--flowix-block-bg-color) 16%, transparent);
+  border-radius: 6px;
+  padding-inline: 0.5rem;
+  margin-inline: -0.5rem;
+}
+
+/* Headings already own generous vertical margins; only widen the band. */
+h1.flowix-block-bg,
+h2.flowix-block-bg,
+h3.flowix-block-bg,
+h4.flowix-block-bg,
+h5.flowix-block-bg,
+h6.flowix-block-bg {
+  padding-block: 0.1em;
+}
+
+/* The toggle wrapper paints the whole container, not a single line. */
+.flowix-toggle.flowix-block-bg {
+  padding: 0.35rem 0.5rem;
+  margin-inline: -0.5rem;
+}
+
+/* ── Toggle / 折叠列表 ───────────────────────────────────── */
+
+.flowix-toggle {
+  position: relative;
+  margin: 0.35rem 0;
+}
+
+.flowix-toggle-chevron {
+  position: absolute;
+  left: 0;
+  top: 0.3em;
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground, #6b7280);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.flowix-toggle-chevron::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4.5px solid transparent;
+  border-bottom: 4.5px solid transparent;
+  border-left: 6px solid currentColor;
+  transform-origin: 50% 50%;
+  transition: transform 120ms ease;
+}
+
+.flowix-toggle[data-open="true"] > .flowix-toggle-chevron::before {
+  transform: rotate(90deg);
+}
+
+.flowix-toggle-chevron:hover,
+.flowix-toggle-chevron:focus-visible {
+  background: var(--muted, #f3f3f3);
+  color: var(--foreground, #34322d);
+  opacity: 1;
+}
+
+.flowix-toggle-content {
+  min-width: 0;
+  padding-left: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+.flowix-toggle-title > :first-child {
+  margin-top: 0;
+}
+
+.flowix-toggle-title > :last-child {
+  margin-bottom: 0;
+}
+
+.flowix-toggle-title > p:empty::before {
+  content: "\00a0";
+}
+
+/* Body rows are indented one more step with a vertical guide line. */
+.flowix-toggle-body {
+  margin-left: 0.2rem;
+  padding-left: 0.85rem;
+  border-left: 1px solid var(--border, #e5e7eb);
+}
+
+.flowix-toggle-body > :first-child {
+  margin-top: 0.25rem;
+}
+
+.flowix-toggle-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* ── Callout / 着重块 ────────────────────────────────────── */
+
+.flowix-callout {
+  --flowix-callout-color: var(--flowix-color-gray);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.85rem 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--flowix-callout-color) 11%, transparent);
+}
+
+.flowix-callout-red { --flowix-callout-color: var(--flowix-color-red); }
+.flowix-callout-orange { --flowix-callout-color: var(--flowix-color-orange); }
+.flowix-callout-yellow { --flowix-callout-color: var(--flowix-color-yellow); }
+.flowix-callout-green { --flowix-callout-color: var(--flowix-color-green); }
+.flowix-callout-cyan { --flowix-callout-color: var(--flowix-color-cyan); }
+.flowix-callout-blue { --flowix-callout-color: var(--flowix-color-blue); }
+.flowix-callout-purple { --flowix-callout-color: var(--flowix-color-purple); }
+.flowix-callout-pink { --flowix-callout-color: var(--flowix-color-pink); }
+.flowix-callout-gray { --flowix-callout-color: var(--flowix-color-gray); }
+
+.flowix-callout-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  margin-top: 0.1rem;
+  font-size: 1.15rem;
+  line-height: 1;
+  user-select: none;
+}
+
+.flowix-callout-content {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.flowix-callout-content > :first-child {
+  margin-top: 0;
+}
+
+.flowix-callout-content > :last-child {
+  margin-bottom: 0;
+}
+
+/* ── Columns / 分栏布局 ──────────────────────────────────── */
+
+.flowix-columns {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.5rem;
+  width: 100%;
+  min-width: 0;
+  margin: 0.85rem 0;
+}
+
+.flowix-column {
+  min-width: 0;
+  flex-basis: 0;
+  flex-shrink: 1;
+}
+
+.flowix-column > :first-child {
+  margin-top: 0;
+}
+
+.flowix-column > :last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 640px) {
+  .flowix-columns {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .flowix-column {
+    flex-basis: auto;
+    width: 100%;
+  }
+}
+
+/* ── Semantic text highlight / 文字颜色 ──────────────────── */
+
+/* A background tint keeps the surrounding text colour (Flowix behaviour);
+   this also wins over the theme-level `.dark mark` colour rule. */
+mark[class*="flowix-text-bg-"] {
+  color: inherit;
+}
+
+mark.flowix-text-bg-red { background-color: color-mix(in oklch, var(--flowix-color-red) 20%, transparent); }
+mark.flowix-text-bg-orange { background-color: color-mix(in oklch, var(--flowix-color-orange) 20%, transparent); }
+mark.flowix-text-bg-yellow { background-color: color-mix(in oklch, var(--flowix-color-yellow) 20%, transparent); }
+mark.flowix-text-bg-green { background-color: color-mix(in oklch, var(--flowix-color-green) 20%, transparent); }
+mark.flowix-text-bg-cyan { background-color: color-mix(in oklch, var(--flowix-color-cyan) 20%, transparent); }
+mark.flowix-text-bg-blue { background-color: color-mix(in oklch, var(--flowix-color-blue) 20%, transparent); }
+mark.flowix-text-bg-purple { background-color: color-mix(in oklch, var(--flowix-color-purple) 20%, transparent); }
+mark.flowix-text-bg-pink { background-color: color-mix(in oklch, var(--flowix-color-pink) 20%, transparent); }
+mark.flowix-text-bg-gray { background-color: color-mix(in oklch, var(--flowix-color-gray) 20%, transparent); }
+
+/* A foreground-only mark keeps the normal highlight background? No: Flowix
+   makes it transparent and only tints the glyphs. */
+mark[class*="flowix-text-fg-"]:not([class*="flowix-text-bg-"]) {
+  background-color: transparent;
+}
+
+mark.flowix-text-fg-red { color: var(--flowix-color-red); }
+mark.flowix-text-fg-orange { color: var(--flowix-color-orange); }
+mark.flowix-text-fg-yellow { color: var(--flowix-color-yellow); }
+mark.flowix-text-fg-green { color: var(--flowix-color-green); }
+mark.flowix-text-fg-cyan { color: var(--flowix-color-cyan); }
+mark.flowix-text-fg-blue { color: var(--flowix-color-blue); }
+mark.flowix-text-fg-purple { color: var(--flowix-color-purple); }
+mark.flowix-text-fg-pink { color: var(--flowix-color-pink); }
+mark.flowix-text-fg-gray { color: var(--flowix-color-gray); }
+
+/* ── Tables (Flowix: light blue header + even-row stripe) ── */
+
+.flowix-table thead {
+  background-color: color-mix(in oklch, var(--flowix-color-cyan) 12%, transparent);
+}
+
+.flowix-table tbody tr:nth-child(even) {
+  background-color: color-mix(in oklch, var(--muted, #f3f3f3) 55%, transparent);
+}
+
+/* ── Web card / 网页卡片 ─────────────────────────────────── */
+
+.flowix-webcard {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 0.85rem 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  background: var(--card, #ffffff);
+  color: inherit;
+  text-decoration: none;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+a.flowix-webcard:hover {
+  background: var(--muted, #f3f3f3);
+  border-color: var(--border, #d4d4d4);
+}
+
+.flowix-webcard-image {
+  flex: 0 0 auto;
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.flowix-webcard-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.flowix-webcard-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--foreground, #34322d);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.flowix-webcard-description {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 0.875em;
+  color: var(--muted-foreground, #6b7280);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.flowix-webcard-host {
+  font-size: 0.75em;
+  color: var(--muted-foreground, #6b7280);
+}
+
+/* ── Collapsed code block ────────────────────────────────── */
+
+.flowix-code-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  background: var(--muted, #f3f3f3);
+  color: var(--muted-foreground, #6b7280);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.flowix-code-collapse-toggle:hover {
+  color: var(--foreground, #34322d);
+}
